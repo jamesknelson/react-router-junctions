@@ -20,7 +20,7 @@ function createSearch(query) {
 }
 
 
-export function createRoute(component, junctionSet, path) {
+export function createReactRoute(component, junctions, path) {
   function getBaseLocation(routerState) {
     var location = routerState.location
 
@@ -33,7 +33,7 @@ export function createRoute(component, junctionSet, path) {
       baseQuery[key] = location.query[key]
     }
 
-    var queryKeys = junctionSet.$$junctionSetMeta.queryKeys
+    var queryKeys = junctions.main ? junctions.main.$$junctionMeta.queryKeys : []
     for (i = 0, len = queryKeys.length; i < len; i++) {
       key = queryKeys[i]
       delete baseQuery[key]
@@ -57,7 +57,16 @@ export function createRoute(component, junctionSet, path) {
     }
   }
 
-  var converter = createConverter(junctionSet)
+  // We can't figure out the base location until our Mount component has been
+  // mounted, but once we *do* know it it won't change. So we store it here
+  // to prevent needing to create multiple converters.
+  var _converter
+  function getConverter(routerState) {
+    if (!_converter) {
+      _converter = createConverter(junctions, getBaseLocation(routerState))
+    }
+    return _converter
+  }
 
   var JunctionMount = React.createClass({
     contextTypes: {
@@ -74,28 +83,30 @@ export function createRoute(component, junctionSet, path) {
       }
     },
 
+    componentWillMount: function() {
+      this.converter = getConverter(this.props)
+    },
+
     render: function render() {
-      var baseLocation = getBaseLocation(this.props)
-        
       return (
         React.createElement(component, {
-          routes: converter.getRouteSetFromLocation(this.props.location, baseLocation),
-          locate: routeSet => converter.getLocationFromRouteSet(routeSet, baseLocation),
+          routes: this.converter.route(this.props.location),
+          locate: this.converter.locate,
         })
       )
     }
   })
 
   function handleChange(_, nextState, replace) {
-    var baseLocation = getBaseLocation(nextState)
-    var currentRouteSet = converter.getRouteSetFromLocation(nextState.location, baseLocation)
+    var converter = getConverter(nextState)
+    var currentRouteSet = converter.route(nextState.location)
 
     if (!currentRouteSet) {
       console.error('react-junctions: Unknown location received')
       return
     }
 
-    var canonicalLocation = converter.getLocationFromRouteSet(currentRouteSet, baseLocation)
+    var canonicalLocation = converter.locate(currentRouteSet)
     if (!locationsEqual(canonicalLocation, nextState.location)) {
       replace(canonicalLocation)
     }
@@ -121,7 +132,7 @@ export const Mount = React.createClass({
   statics: {
     createRouteFromReactElement: function createRouteFromReactElement(element) {
       var component = element.props.component
-      return createRoute(component, component.junctionSet, element.props.path)
+      return createReactRoute(component, component.junctions, element.props.path)
     },
   },
 
